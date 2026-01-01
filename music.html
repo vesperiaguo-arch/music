@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Vela Moment - 数学、音乐与视觉的交响</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tween.js/18.6.4/tween.umd.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #050505; color: white; font-family: 'Inter', system-ui, sans-serif; -webkit-tap-highlight-color: transparent; }
+        canvas { display: block; }
+        .glass { background: rgba(255, 255, 255, 0.05); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.1); }
+        input[type="range"] { accent-color: #6366f1; height: 6px; }
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 10px; }
+        @keyframes pulse-slow { 0%, 100% { opacity: 0.3; } 50% { opacity: 0.7; } }
+        .animate-pulse-slow { animation: pulse-slow 3s infinite; }
+        .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+        .sortable-ghost { background: rgba(99, 102, 241, 0.3) !important; opacity: 0.5; }
+        .sortable-drag { background: rgba(255, 255, 255, 0.1) !important; cursor: grabbing; }
+        .active-track { border-left: 2px solid #6366f1; background: rgba(99, 102, 241, 0.1); }
+    </style>
+</head>
+<body>
+
+    <div id="ui-root" class="fixed inset-0 pointer-events-none flex flex-col justify-between p-4 md:p-6 z-10">
+        <!-- Top Bar -->
+        <div class="flex flex-row justify-between items-start pointer-events-auto mt-[env(safe-area-inset-top)]">
+            <div class="max-w-[60%]">
+                <h1 class="text-xl md:text-2xl font-bold tracking-tighter text-indigo-400">Han MOMENT</h1>
+                <p id="current-song-ui" class="text-[10px] opacity-60 uppercase mt-1 truncate">本地模式已初始化</p>
+                <!-- Playback Controls -->
+                <div class="flex items-center gap-4 mt-2">
+                    <button id="main-prev-btn" class="hover:text-indigo-400 transition transform active:scale-90">
+                        <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
+                    </button>
+                    <button id="main-play-btn" class="hover:text-indigo-400 transition transform active:scale-90">
+                        <svg id="play-icon" viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                        <svg id="pause-icon" class="hidden" viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+                    </button>
+                    <button id="main-next-btn" class="hover:text-indigo-400 transition transform active:scale-90">
+                        <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
+                    </button>
+                </div>
+            </div>
+            
+            <div class="glass p-2 md:p-3 rounded-xl md:rounded-2xl w-32 md:w-40 text-center">
+                <div class="text-[9px] uppercase opacity-50 mb-0.5">番茄钟</div>
+                <div id="pomo-timer" class="text-lg md:text-xl font-mono font-bold">25:00</div>
+                <div class="flex justify-center gap-1.5 mt-1.5">
+                    <button id="pomo-toggle" class="text-[9px] bg-indigo-600 px-2.5 py-1 rounded-full hover:bg-indigo-500 transition active:scale-95">开始</button>
+                    <button id="pomo-reset" class="text-[9px] bg-white/10 px-2.5 py-1 rounded-full hover:bg-white/20 transition active:scale-95">重置</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="welcome-msg" class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-center pointer-events-none w-full px-8 hidden">
+            <div class="text-2xl md:text-4xl font-light tracking-widest opacity-20 animate-pulse-slow">点击上传或添加链接</div>
+        </div>
+
+        <!-- Bottom UI -->
+        <div class="flex flex-col md:flex-row gap-3 md:gap-4 items-stretch md:items-end pointer-events-auto w-full safe-bottom">
+            <div class="glass rounded-xl md:rounded-2xl p-3 md:p-4 w-full md:w-80 flex flex-col gap-2 md:gap-3">
+                <div class="flex justify-between items-center">
+                    <h2 class="text-sm font-semibold">媒体库</h2>
+                    <label class="cursor-pointer bg-indigo-600 hover:bg-indigo-500 text-[10px] px-3 py-1 rounded-full transition active:scale-95">
+                        本地添加
+                        <input type="file" id="audio-upload" multiple accept="audio/*" class="hidden">
+                    </label>
+                </div>
+                
+                <div class="flex gap-2">
+                    <input type="text" id="audio-url-input" placeholder="输入音频链接..." 
+                           class="bg-white/5 border border-white/10 rounded-lg px-2 py-1 text-[11px] flex-1 outline-none focus:border-indigo-500 transition">
+                    <button id="add-url-btn" class="bg-white/10 hover:bg-white/20 text-[10px] px-3 py-1 rounded-lg transition active:scale-95">添加</button>
+                </div>
+
+                <ul id="playlist" class="space-y-1.5 text-[11px] max-h-32 md:max-h-40 overflow-y-auto pr-1">
+                    <li class="opacity-40 italic text-center py-4 no-sort">加载中...</li>
+                </ul>
+            </div>
+
+            <div class="glass rounded-xl md:rounded-2xl p-3 md:p-4 flex-1">
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
+                    <div>
+                        <label class="block text-[9px] uppercase opacity-50 mb-1">几何形状</label>
+                        <select id="shape-select" class="bg-white/5 border border-white/10 rounded px-1.5 py-1 text-[11px] w-full outline-none focus:border-indigo-500 transition">
+                            <option value="galaxy">星系螺旋</option>
+                            <option value="lorenz">洛伦兹吸引子</option>
+                            <option value="mobius">莫比乌斯带</option>
+                            <option value="menger">门格海绵</option>
+                            <option value="heart">笛卡尔心</option>
+                            <option value="koch">科赫雪花</option>
+                            <option value="penrose">彭罗斯三角</option>
+                            <option value="fractal">分形结构</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-[9px] uppercase opacity-50 mb-1">灵敏度</label>
+                        <input type="range" id="param-sens" min="1" max="25" step="0.1" value="10" class="w-full">
+                    </div>
+                    <div>
+                        <label class="block text-[9px] uppercase opacity-50 mb-1">粒子大小</label>
+                        <input type="range" id="param-size" min="0.1" max="5" step="0.1" value="1.8" class="w-full">
+                    </div>
+                    <div>
+                        <label class="block text-[9px] uppercase opacity-50 mb-1">颜色主题</label>
+                        <select id="theme-select" class="bg-white/5 border border-white/10 rounded px-1.5 py-1 text-[11px] w-full outline-none focus:border-indigo-500 transition">
+                            <option value="cosmic">宇宙深蓝</option>
+                            <option value="neon">赛博霓虹</option>
+                            <option value="gold">烈焰金红</option>
+                            <option value="emerald">极光翠绿</option>
+                            <option value="monet">莫奈花园</option>
+                            <option value="snow">雾凇雪原</option>
+                            <option value="lakeside">湖畔晨曦</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <audio id="audio-player" crossorigin="anonymous"></audio>
+
+    <script>
+        let playlist = [];
+        let currentIndex = -1;
+        const STORAGE_KEY = 'vela_moment_playlist';
+
+        const DEFAULT_SONGS = [
+            { name: "Cosmic Serenity", source: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3", type: "url" },
+            { name: "Neon Dreams", source: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3", type: "url" },
+            { name: "Mathematical Rhythm", source: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3", type: "url" }
+        ];
+
+        // --- 文件处理工具函数 ---
+        function fileToBase64(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = error => reject(error);
+                reader.readAsDataURL(file);
+            });
+        }
+
+        function base64ToBlob(base64Data) {
+            const parts = base64Data.split(';base64,');
+            const contentType = parts[0].split(':')[1];
+            const raw = window.atob(parts[1]);
+            const rawLength = raw.length;
+            const uInt8Array = new Uint8Array(rawLength);
+            
+            for (let i = 0; i < rawLength; ++i) {
+                uInt8Array[i] = raw.charCodeAt(i);
+            }
+            return new Blob([uInt8Array], { type: contentType });
+        }
+
+        // --- 本地存储逻辑 ---
+        function savePlaylistToLocal() {
+            // 只序列化可存储的数据
+            const serializableList = playlist.map(item => {
+                if (item.type === 'file' && item.source instanceof File) {
+                    return null; // 本地文件无法持久化，临时播放
+                }
+                return item;
+            }).filter(Boolean);
+            
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(serializableList));
+        }
+
+        function loadPlaylistFromLocal() {
+            const saved = localStorage.getItem(STORAGE_KEY);
+            if (saved) {
+                try {
+                    return JSON.parse(saved);
+                } catch (e) {
+                    return [...DEFAULT_SONGS];
+                }
+            }
+            return [...DEFAULT_SONGS];
+        }
+
+        // --- Core 3D Logic ---
+        let scene, camera, renderer, particles, geometry;
+        let audioCtx, analyser, dataArray, sourceNode;
+        const PARTICLE_COUNT = 15000;
+        let positions, colors, targetPositions;
+        let currentShape = 'galaxy';
+        let audioInited = false;
+
+        const shapeGenerators = {
+            galaxy: (i) => {
+                const angle = 0.1 * i;
+                const r = 0.5 * angle;
+                const spread = (Math.random() - 0.5) * 1.5;
+                return [r * Math.cos(angle) + spread, (Math.random() - 0.5) * 5, r * Math.sin(angle) + spread];
+            },
+            lorenz: (i) => {
+                let x = 0.1, y = 0, z = 0;
+                let dt = 0.01;
+                for(let j = 0; j < (i % 500); j++) {
+                    let dx = 10 * (y - x) * dt;
+                    let dy = (x * (28 - z) - y) * dt;
+                    let dz = (x * y - (8/3) * z) * dt;
+                    x += dx; y += dy; z += dz;
+                }
+                return [x * 0.35, y * 0.35, (z - 25) * 0.35];
+            },
+            mobius: (i) => {
+                const u = Math.random() * Math.PI * 2;
+                const v = Math.random() * 2 - 1;
+                const x = (1 + v/2 * Math.cos(u/2)) * Math.cos(u);
+                const y = (1 + v/2 * Math.cos(u/2)) * Math.sin(u);
+                const z = v/2 * Math.sin(u/2);
+                return [x * 8, y * 8, z * 8];
+            },
+            menger: (i) => {
+                const size = 8;
+                const r = (i % 3 === 0) ? 1 : (i % 3 === 1 ? 0.33 : 0.11);
+                const x = (Math.random() > 0.5 ? 1 : -1) * size * r;
+                const y = (Math.random() - 0.5) * 2 * size * r;
+                const z = (Math.random() - 0.5) * 2 * size * r;
+                return [x, y, z];
+            },
+            heart: (i) => {
+                const t = Math.random() * Math.PI * 2;
+                const x = 16 * Math.pow(Math.sin(t), 3);
+                const y = 13 * Math.cos(t) - 5 * Math.cos(2*t) - 2 * Math.cos(3*t) - Math.cos(4*t);
+                const z = (Math.random() - 0.5) * 5;
+                return [x * 0.5, y * 0.5, z];
+            },
+            koch: (i) => {
+                const t = (i / PARTICLE_COUNT) * Math.PI * 2;
+                const r = 8 * (1 + 0.2 * Math.sin(6 * t));
+                const x = r * Math.cos(t);
+                const y = r * Math.sin(t);
+                const z = Math.sin(12 * t) * 2;
+                return [x, y, z];
+            },
+            penrose: (i) => {
+                const side = i % 3;
+                const segment = Math.random() * 10 - 5;
+                const offset = (Math.random() - 0.5) * 0.5;
+                if(side === 0) return [segment, -5 + offset, offset];
+                if(side === 1) return [5 + offset, segment, offset];
+                if(side === 2) return [offset, segment, 5 + offset];
+                return [0,0,0];
+            },
+            fractal: (i) => {
+                const iter = 8;
+                let x = Math.random() * 2 - 1;
+                let y = Math.random() * 2 - 1;
+                let z = Math.random() * 2 - 1;
+                const c = [x, y, z];
+                let r = 0;
+                for(let j=0; j<iter; j++) {
+                    r = Math.sqrt(x*x + y*y + z*z);
+                    if(r > 2) break;
+                    let theta = Math.atan2(Math.sqrt(x*x + y*y), z);
+                    let phi = Math.atan2(y, x);
+                    let nr = Math.pow(r, 8);
+                    x = nr * Math.sin(theta*8) * Math.cos(phi*8) + c[0];
+                    y = nr * Math.sin(theta*8) * Math.sin(phi*8) + c[1];
+                    z = nr * Math.cos(theta*8) + c[2];
+                }
+                return [c[0]*8, c[1]*8, c[2]*8];
+            }
+        };
+
+        const themes = {
+            cosmic: { bg: 0x050505, p: [0.3, 0.4, 1.0] },
+            neon: { bg: 0x0a0015, p: [1.0, 0.0, 1.0] },
+            gold: { bg: 0x1a0a00, p: [1.0, 0.8, 0.0] },
+            emerald: { bg: 0x001a0a, p: [0.0, 1.0, 0.5] },
+            monet: { bg: 0x14101a, p: [0.7, 0.5, 0.9] },
+            snow: { bg: 0x0a0d14, p: [0.85, 0.95, 1.0] },
+            lakeside: { bg: 0x0d151a, p: [1.0, 0.7, 0.4] }
+        };
+
+        let currentTheme = themes.cosmic;
+
+        function init3D() {
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.z = 25;
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.setClearColor(currentTheme.bg);
+            document.body.appendChild(renderer.domElement);
+
+            geometry = new THREE.BufferGeometry();
+            positions = new Float32Array(PARTICLE_COUNT * 3);
+            colors = new Float32Array(PARTICLE_COUNT * 3);
+            targetPositions = new Float32Array(PARTICLE_COUNT * 3);
+
+            for (let i = 0; i < PARTICLE_COUNT; i++) {
+                const pos = shapeGenerators.galaxy(i);
+                positions[i * 3] = pos[0];
+                positions[i * 3 + 1] = pos[1];
+                positions[i * 3 + 2] = pos[2];
+                targetPositions[i * 3] = pos[0];
+                targetPositions[i * 3 + 1] = pos[1];
+                targetPositions[i * 3 + 2] = pos[2];
+                colors[i * 3] = currentTheme.p[0];
+                colors[i * 3 + 1] = currentTheme.p[1];
+                colors[i * 3 + 2] = currentTheme.p[2];
+            }
+
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+            const material = new THREE.PointsMaterial({
+                size: 0.18,
+                vertexColors: true,
+                transparent: true,
+                opacity: 0.8,
+                blending: THREE.AdditiveBlending,
+                sizeAttenuation: true
+            });
+
+            particles = new THREE.Points(geometry, material);
+            scene.add(particles);
+
+            new Sortable(document.getElementById('playlist'), {
+                animation: 150,
+                ghostClass: 'sortable-ghost',
+                dragClass: 'sortable-drag',
+                filter: '.no-sort',
+                onEnd: function (evt) {
+                    const item = playlist.splice(evt.oldIndex, 1)[0];
+                    playlist.splice(evt.newIndex, 0, item);
+                    if (currentIndex === evt.oldIndex) currentIndex = evt.newIndex;
+                    else if (currentIndex > evt.oldIndex && currentIndex <= evt.newIndex) currentIndex--;
+                    else if (currentIndex < evt.oldIndex && currentIndex >= evt.newIndex) currentIndex++;
+                    
+                    savePlaylistToLocal();
+                    updatePlaylistUI();
+                }
+            });
+
+            window.addEventListener('resize', onWindowResize);
+            animate();
+        }
+
+        function updateShape(shapeKey) {
+            currentShape = shapeKey;
+            const generator = shapeGenerators[shapeKey];
+            for (let i = 0; i < PARTICLE_COUNT; i++) {
+                const pos = generator(i);
+                targetPositions[i * 3] = pos[0];
+                targetPositions[i * 3 + 1] = pos[1];
+                targetPositions[i * 3 + 2] = pos[2];
+            }
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            TWEEN.update();
+
+            particles.rotation.y += 0.0015;
+            particles.rotation.z += 0.0005;
+
+            const posAttr = geometry.attributes.position;
+            const colorAttr = geometry.attributes.color;
+            const sens = parseFloat(document.getElementById('param-sens').value);
+            const size = parseFloat(document.getElementById('param-size').value);
+            particles.material.size = size * 0.1;
+
+            if (audioInited && analyser) {
+                analyser.getByteFrequencyData(dataArray);
+            }
+
+            for (let i = 0; i < PARTICLE_COUNT; i++) {
+                const i3 = i * 3;
+                posAttr.array[i3] += (targetPositions[i3] - posAttr.array[i3]) * 0.08;
+                posAttr.array[i3 + 1] += (targetPositions[i3 + 1] - posAttr.array[i3 + 1]) * 0.08;
+                posAttr.array[i3 + 2] += (targetPositions[i3 + 2] - posAttr.array[i3 + 2]) * 0.08;
+
+                if (audioInited) {
+                    const f = dataArray[i % 128] / 255.0;
+                    const bounce = 1 + f * (sens / 10) * 0.4;
+                    posAttr.array[i3] *= bounce;
+                    posAttr.array[i3+1] *= bounce;
+                    posAttr.array[i3+2] *= bounce;
+                    
+                    colorAttr.array[i3] = Math.min(1.0, currentTheme.p[0] + f * 1.2);
+                    colorAttr.array[i3+1] = Math.min(1.0, currentTheme.p[1] + f * 0.8);
+                    colorAttr.array[i3+2] = Math.min(1.0, currentTheme.p[2] + f * 0.5);
+                }
+            }
+            posAttr.needsUpdate = true;
+            colorAttr.needsUpdate = true;
+            renderer.render(scene, camera);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // --- Playback Logic ---
+        const audioPlayer = document.getElementById('audio-player');
+        const playIcon = document.getElementById('play-icon');
+        const pauseIcon = document.getElementById('pause-icon');
+
+        audioPlayer.addEventListener('play', () => {
+            playIcon.classList.add('hidden');
+            pauseIcon.classList.remove('hidden');
+        });
+
+        audioPlayer.addEventListener('pause', () => {
+            playIcon.classList.remove('hidden');
+            pauseIcon.classList.add('hidden');
+        });
+
+        audioPlayer.addEventListener('ended', () => {
+            window.nextTrack();
+        });
+
+        window.togglePlay = () => {
+            if (!audioPlayer.src) {
+                if (playlist.length > 0) window.playTrack(0);
+                return;
+            }
+            if (audioPlayer.paused) audioPlayer.play();
+            else audioPlayer.pause();
+        };
+
+        window.nextTrack = () => {
+            if (playlist.length === 0) return;
+            let nextIndex = (currentIndex + 1) % playlist.length;
+            window.playTrack(nextIndex);
+        };
+
+        window.prevTrack = () => {
+            if (playlist.length === 0) return;
+            let prevIndex = (currentIndex <= 0) ? playlist.length - 1 : currentIndex - 1;
+            window.playTrack(prevIndex);
+        };
+
+        window.playTrack = (index) => {
+            const item = playlist[index];
+            if (!item) return;
+            
+            currentIndex = index;
+            const src = item.type === 'file' ? URL.createObjectURL(item.source) : item.source;
+            
+            audioPlayer.src = src;
+            document.getElementById('current-song-ui').innerText = `正在播放: ${item.name}`;
+
+            if (!audioInited) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                analyser = audioCtx.createAnalyser();
+                sourceNode = audioCtx.createMediaElementSource(audioPlayer);
+                sourceNode.connect(analyser);
+                analyser.connect(audioCtx.destination);
+                analyser.fftSize = 256;
+                dataArray = new Uint8Array(analyser.frequencyBinCount);
+                audioInited = true;
+            }
+            
+            const hash = item.name.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+            const shapeKeys = Object.keys(shapeGenerators);
+            const selectedShape = shapeKeys[hash % shapeKeys.length];
+            document.getElementById('shape-select').value = selectedShape;
+            updateShape(selectedShape);
+
+            audioPlayer.play().catch(() => {
+                document.getElementById('current-song-ui').innerText = "播放失败: 链接无效或文件损坏";
+            });
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            updatePlaylistUI();
+        };
+
+        window.removeTrack = (index, event) => {
+            if (event) event.stopPropagation();
+            playlist.splice(index, 1);
+            if (currentIndex === index) {
+                audioPlayer.pause();
+                audioPlayer.src = "";
+                currentIndex = -1;
+            } else if (currentIndex > index) {
+                currentIndex--;
+            }
+            savePlaylistToLocal();
+            updatePlaylistUI();
+            if (playlist.length === 0) {
+                document.getElementById('welcome-msg').classList.remove('hidden');
+            }
+        };
+
+        function updatePlaylistUI() {
+            const playlistUI = document.getElementById('playlist');
+            if (playlist.length === 0) {
+                playlistUI.innerHTML = `<li class="opacity-40 italic text-center py-4 no-sort">媒体库为空</li>`;
+                document.getElementById('welcome-msg').classList.remove('hidden');
+                return;
+            }
+            document.getElementById('welcome-msg').classList.add('hidden');
+            playlistUI.innerHTML = playlist.map((item, i) => `
+                <li onclick="playTrack(${i})" class="group cursor-grab active:cursor-grabbing hover:text-indigo-400 truncate flex items-center gap-2 p-2 rounded hover:bg-white/5 transition relative active:bg-white/10 ${i === currentIndex ? 'active-track' : ''}">
+                    <span class="opacity-30 text-[10px] w-4 pointer-events-none">${i+1}</span>
+                    <span class="flex-1 truncate pointer-events-none ${i === currentIndex ? 'text-indigo-300 font-bold' : ''}">${item.name}</span>
+                    <button onclick="removeTrack(${i}, event)" class="opacity-40 hover:text-red-400 p-2 transition text-lg leading-none">
+                        &times;
+                    </button>
+                </li>
+            `).join('');
+        }
+
+        // --- Event Listeners ---
+        document.getElementById('main-prev-btn').addEventListener('click', () => window.prevTrack());
+        document.getElementById('main-play-btn').addEventListener('click', () => window.togglePlay());
+        document.getElementById('main-next-btn').addEventListener('click', () => window.nextTrack());
+
+        // 文件上传
+        document.getElementById('audio-upload').addEventListener('change', (e) => {
+            Array.from(e.target.files).forEach(f => {
+                playlist.push({ name: f.name, source: f, type: 'file' });
+            });
+            updatePlaylistUI();
+            // 本地文件刷新后会丢失，仅临时播放
+        });
+
+        document.getElementById('add-url-btn').addEventListener('click', () => {
+            const urlInput = document.getElementById('audio-url-input');
+            const url = urlInput.value.trim();
+            if (url) {
+                const name = url.split('/').pop().split('?')[0] || "网络音频";
+                playlist.push({ name, source: url, type: 'url' });
+                urlInput.value = "";
+                savePlaylistToLocal();
+                updatePlaylistUI();
+            }
+        });
+
+        document.getElementById('shape-select').addEventListener('change', (e) => updateShape(e.target.value));
+        document.getElementById('theme-select').addEventListener('change', (e) => {
+            currentTheme = themes[e.target.value];
+            renderer.setClearColor(currentTheme.bg);
+        });
+
+        // 番茄钟逻辑
+        document.getElementById('pomo-toggle').addEventListener('click', () => {
+            let timerEl = document.getElementById('pomo-timer');
+            let btn = document.getElementById('pomo-toggle');
+            if (window.pomoInterval) {
+                clearInterval(window.pomoInterval);
+                window.pomoInterval = null;
+                btn.innerText = "开始";
+            } else {
+                btn.innerText = "暂停";
+                let pomoTime = parseInt(timerEl.innerText.split(':')[0]) * 60 + parseInt(timerEl.innerText.split(':')[1]);
+                window.pomoInterval = setInterval(() => {
+                    pomoTime--;
+                    const m = Math.floor(pomoTime / 60);
+                    const s = pomoTime % 60;
+                    timerEl.innerText = `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+                    if (pomoTime <= 0) {
+                        clearInterval(window.pomoInterval);
+                        window.pomoInterval = null;
+                        btn.innerText = "完成";
+                    }
+                }, 1000);
+            }
+        });
+
+        document.getElementById('pomo-reset').addEventListener('click', () => {
+            clearInterval(window.pomoInterval);
+            window.pomoInterval = null;
+            document.getElementById('pomo-timer').innerText = "25:00";
+            document.getElementById('pomo-toggle').innerText = "开始";
+        });
+
+        // 初始化
+        window.onload = () => {
+            init3D();
+            playlist = loadPlaylistFromLocal();
+            updatePlaylistUI();
+            document.getElementById('current-song-ui').innerText = "本地模式已就绪";
+        };
+    </script>
+</body>
+</html>
